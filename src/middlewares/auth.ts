@@ -57,7 +57,6 @@ export const authMiddleware = async (
 
     logger.debug({ api_key_id: key_data.id }, 'Auth successful');
 
-    // Attach key info to context for downstream middlewares
     c.set('apiKeyInfo', key_data);
 
     await next();

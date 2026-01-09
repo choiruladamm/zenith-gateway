@@ -47,7 +47,7 @@ describe('Zenith Gateway', () => {
     const limit = res.headers.get('X-RateLimit-Limit');
     const remaining = res.headers.get('X-RateLimit-Remaining');
 
-    expect(limit).toBe('60'); // Basic plan limit from seed.ts
+    expect(limit).toBe('60');
     expect(Number(remaining)).toBeLessThan(60);
   });
 
@@ -93,7 +93,6 @@ describe('Zenith Gateway', () => {
 
     expect(res.status).toBe(200);
 
-    // Wait a bit for the async logging to happen
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     const { db } = await import('./db/index.js');

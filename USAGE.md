@@ -1,121 +1,99 @@
-# 📖 Zenith Gateway Usage Guide
+# Zenith Gateway Documentation
 
-This guide will walk you through setting up and using the Zenith Gateway to proxy, secure, and monetize your APIs.
+This guide covers the technical implementation details for configuring and interacting with the Zenith Gateway.
 
----
+## Environment Configuration
 
-## 🛠️ 1. Setup & Installation
-
-### Environment Variables
-
-Copy `.env.example` to `.env` and fill in your credentials:
+Configure your `.env` file with the following required variables:
 
 ```bash
-# Database (General Postgres)
+# PostgreSQL Connection (compatible with Neon, RDS, or local pg)
 DATABASE_URL=postgres://user:password@localhost:5432/zenith_db
 
-# Redis (Upstash)
+# Upstash Redis for Rate Limiting
 UPSTASH_REDIS_URL=your_redis_url
 UPSTASH_REDIS_TOKEN=your_redis_token
 
-# App
+# App Port
 PORT=3000
 
-# Security (Allowlist)
-ALLOWED_DOMAINS=openai.com,httpbin.org
+# SSRF Protection: Comma-separated allowlist of target hostnames
+ALLOWED_DOMAINS=openai.com,httpbin.org,jsonplaceholder.typicode.com
 ```
 
----
+## Database Management
 
-## 🗄️ 2. Database Preparation
+We use **Drizzle ORM** for schema synchronization and data seeding.
 
-Zenith works with any PostgreSQL instance.
+### Push Schema
 
-### Schema Setup
-
-We use **Drizzle ORM** for schema management. Once you have your `DATABASE_URL` set up, run:
+To sync your local schema definitions with the database instance:
 
 ```bash
 bun run db:push
 ```
 
-### Automatic Seeding (Recommended)
+### Initial Data & Tests
 
-To quickly set up default plans (Basic, Pro, Enterprise), a default organization, and a test API key, run:
+To populate default plans (`Basic`, `Pro`, `Enterprise`) and create an initial test key:
 
 ```bash
 bun run db:seed
 ```
 
-This will create a default test key: `zenith_test_key_123`.
+_Note: This creates a default key `zenith_test_key_123` for immediate testing._
 
----
+### API Key Generation
 
-## 🚀 3. Running the Gateway
+Access keys are SHA-256 hashed. Do not insert keys manually. Use the CLI tool:
 
 ```bash
-# Install dependencies
-bun install
-
-# Start development server
-bun run dev
+bun run db:generate-key "optional-label"
 ```
 
----
+## Making Requests
 
-## 📡 4. Making Requests
+Zenith acts as a pass-through proxy. It expects the target URL to be appended to the `/proxy/` path.
 
-The gateway expects a URL in the path and an `X-Zenith-Key` header.
+### Request Format
 
-### Endpoint Structure
+- **Endpoint**: `ANY /proxy/<TARGET_URL>`
+- **Header**: `X-Zenith-Key: <PLAIN_TEXT_KEY>`
 
-`ALL /proxy/<TARGET_URL>`
-
-### Authentication
-
-- Header: `X-Zenith-Key`
-- Value: Your generated API Key (e.g., `zenith_test_key_123`)
-
-### Example Curl
+### Example Construction
 
 ```bash
 curl -X GET \
   -H "X-Zenith-Key: zenith_test_key_123" \
-  "http://localhost:3000/proxy/https://jsonplaceholder.typicode.com/posts"
+  "http://localhost:3000/proxy/httpbin.org/get"
 ```
 
-> [!IMPORTANT]
-> Use the **plain text** key in the header. The gateway handles hashing automatically before checking the database.
+The gateway automatically handles protocol prepending (defaults to `https://`) if not specified in the target URL.
 
----
+## Gateway Response Headers
 
-## 📊 5. Understanding Response Headers
+Every proxied request returns rate-limit metadata injected by the `rateLimitMiddleware`:
 
-Zenith Gateway injects rate limit information into every successful response header:
+- `X-RateLimit-Limit`: Maximum requests permitted per 1-minute window.
+- `X-RateLimit-Remaining`: Remaining allowance in the current window.
 
-- `X-RateLimit-Limit`: Total requests allowed per minute for your plan.
-- `X-RateLimit-Remaining`: Number of requests left in the current 1-minute window.
+## HTTP Status Codes
 
----
+The gateway implements the following specific status codes:
 
-## ⚠️ 6. Common Status Codes
+| Code    | Status            | Logic / Trigger                                           |
+| :------ | :---------------- | :-------------------------------------------------------- |
+| **200** | OK                | Upstream request resolved successfully.                   |
+| **401** | Unauthorized      | Invalid key or missing `X-Zenith-Key` header.             |
+| **403** | Forbidden         | Hostname failed SSRF allowlist check (`ALLOWED_DOMAINS`). |
+| **429** | Too Many Requests | Rate limit exceeded (managed by Redis).                   |
+| **502** | Bad Gateway       | Upstream target is unreachable or timed out.              |
 
-| Code    | Meaning           | Cause                                        |
-| :------ | :---------------- | :------------------------------------------- |
-| **200** | Success           | Request forwarded and returned successfully. |
-| **401** | Unauthorized      | Missing or invalid `X-Zenith-Key`.           |
-| **429** | Too Many Requests | You have exceeded your plan's rate limit.    |
-| **400** | Bad Request       | Missing the target URL in the path.          |
-| **403** | Forbidden         | The target domain is not in the allowlist.   |
-| **502** | Bad Gateway       | The upstream `url` failed to respond.        |
+## Telemetry & Logging
 
----
+Asynchronous usage tracking is performed on every successful request. Records are persisted to the `usage_logs` table with the following data points:
 
-## 📈 7. Monitoring Usage
-
-All requests are logged in the `usage_logs` table. You can query this table to see:
-
-- Latency of each request.
-- Status codes returned by upstream APIs.
-- Frequency of hits per API Key.
-- Endpoint patterns.
+- `key_id`: Reference to the authenticating API Key.
+- `latency_ms`: Round-trip time of the upstream request.
+- `status_code`: HTTP status returned from the target.
+- `endpoint/method`: Target request metadata.
