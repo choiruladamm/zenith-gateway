@@ -5,12 +5,13 @@ import { eq, and } from 'drizzle-orm';
 import { logger } from '../services/logger.js';
 import { Variables } from '../types/index.js';
 import { hashApiKey } from '../utils/crypto.js';
+import { HEADERS } from '../constants/index.js';
 
 export const authMiddleware = async (
   c: Context<{ Variables: Variables }>,
   next: Next,
 ) => {
-  const api_key = c.req.header('X-Zenith-Key');
+  const api_key = c.req.header(HEADERS.API_KEY);
 
   if (!api_key) {
     logger.debug('Auth failed: Missing API Key');

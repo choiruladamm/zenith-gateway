@@ -24,3 +24,5 @@ bun-debug.log*
 
 # Bun
 .bun/
+
+.agent
