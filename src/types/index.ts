@@ -13,11 +13,12 @@ export interface ApiKey {
   hint: string;
   status: 'active' | 'revoked' | 'expired';
   plan_id: string;
-  plans?: Plan; // Supabase join usually returns 'plans' not 'plan' based on table name
+  plans?: Plan;
 }
 
 export interface UsageLog {
-  api_key_id: string;
+  id?: string;
+  key_id: string;
   endpoint: string;
   method: string;
   status_code: number;

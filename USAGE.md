@@ -11,9 +11,8 @@ This guide will walk you through setting up and using the Zenith Gateway to prox
 Copy `.env.example` to `.env` and fill in your credentials:
 
 ```bash
-# Supabase
-SUPABASE_URL=your_project_url
-SUPABASE_ANON_KEY=your_anon_key
+# Database (General Postgres)
+DATABASE_URL=postgres://user:password@localhost:5432/zenith_db
 
 # Redis (Upstash)
 UPSTASH_REDIS_URL=your_redis_url
@@ -21,32 +20,34 @@ UPSTASH_REDIS_TOKEN=your_redis_token
 
 # App
 PORT=3000
+
+# Security (Allowlist)
+ALLOWED_DOMAINS=openai.com,httpbin.org
 ```
 
 ---
 
 ## 🗄️ 2. Database Preparation
 
-1.  Go to your **Supabase SQL Editor**.
-2.  Copy and run the contents of `supabase/migrations/20240107000000_initial_schema.sql`.
-3.  **Insert an Organization & API Key**:
-    Zenith Gateway now uses **SHA-256 hashing** for security. You must hash your key before inserting it.
+Zenith works with any PostgreSQL instance.
 
-    ```bash
-    # Generate hash for 'test-key-123'
-    echo -n "test-key-123" | shasum -a 256
-    # Output: 625faa3fbbc3d2bd9d6ee7678d04cc5339cb33dc68d9b58451853d60046e226a
-    ```
+### Schema Setup
 
-    ```sql
-    -- Insert an organization
-    INSERT INTO organizations (name) VALUES ('My First Org') RETURNING id;
+We use **Drizzle ORM** for schema management. Once you have your `DATABASE_URL` set up, run:
 
-    -- Insert the HASHED API Key
-    -- Replace ORG_ID and PLAN_ID with real IDs
-    INSERT INTO api_keys (org_id, key_hash, hint, status, plan_id)
-    VALUES ('<ORG_ID>', '625faa3fbbc3d2bd9d6ee7678d04cc5339cb33dc68d9b58451853d60046e226a', 'test', 'active', '<PLAN_ID>');
-    ```
+```bash
+bun run db:push
+```
+
+### Automatic Seeding (Recommended)
+
+To quickly set up default plans (Basic, Pro, Enterprise), a default organization, and a test API key, run:
+
+```bash
+bun run db:seed
+```
+
+This will create a default test key: `zenith_test_key_123`.
 
 ---
 
@@ -64,7 +65,7 @@ bun run dev
 
 ## 📡 4. Making Requests
 
-The gateway expects a `url` query parameter and an `X-Zenith-Key` header.
+The gateway expects a URL in the path and an `X-Zenith-Key` header.
 
 ### Endpoint Structure
 
@@ -73,14 +74,14 @@ The gateway expects a `url` query parameter and an `X-Zenith-Key` header.
 ### Authentication
 
 - Header: `X-Zenith-Key`
-- Value: Your generated API Key
+- Value: Your generated API Key (e.g., `zenith_test_key_123`)
 
 ### Example Curl
 
 ```bash
 curl -X GET \
-  -H "X-Zenith-Key: test-key-123" \
-  "http://localhost:3000/proxy/https://jsonplaceholder.typicode.com/posts/1"
+  -H "X-Zenith-Key: zenith_test_key_123" \
+  "http://localhost:3000/proxy/https://jsonplaceholder.typicode.com/posts"
 ```
 
 > [!IMPORTANT]
@@ -105,14 +106,16 @@ Zenith Gateway injects rate limit information into every successful response hea
 | **401** | Unauthorized      | Missing or invalid `X-Zenith-Key`.           |
 | **429** | Too Many Requests | You have exceeded your plan's rate limit.    |
 | **400** | Bad Request       | Missing the target URL in the path.          |
+| **403** | Forbidden         | The target domain is not in the allowlist.   |
 | **502** | Bad Gateway       | The upstream `url` failed to respond.        |
 
 ---
 
 ## 📈 7. Monitoring Usage
 
-All requests are logged in the `usage_logs` table in Supabase. You can query this table to see:
+All requests are logged in the `usage_logs` table. You can query this table to see:
 
 - Latency of each request.
 - Status codes returned by upstream APIs.
 - Frequency of hits per API Key.
+- Endpoint patterns.

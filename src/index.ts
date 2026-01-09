@@ -7,7 +7,6 @@ import { logger } from './services/logger.js';
 import { Variables } from './types/index.js';
 import { validateConfig, config } from './services/config.js';
 
-// Validate environment on startup
 validateConfig();
 
 const app = new Hono<{ Variables: Variables }>();
@@ -22,7 +21,11 @@ app.all(
   rateLimitMiddleware,
   usageMiddleware,
   async (c) => {
-    const url = c.req.url.replace(/.*\/proxy\//, '');
+    let url = c.req.url.replace(/.*\/proxy\//, '');
+
+    if (url && !url.includes('://')) {
+      url = 'https://' + url;
+    }
 
     logger.info(
       {
@@ -41,16 +44,24 @@ app.all(
     try {
       const response = await forwardRequest(url, c.req.raw);
 
-      // Create a new response to return to client
+      // Forward headers from upstream, but filter them too if needed
+      const responseHeaders = new Headers(response.headers);
+
+      // Merge headers from middlewares (e.g., rate-limit headers)
+      c.res.headers.forEach((value, key) => {
+        responseHeaders.set(key, value);
+      });
+
       return new Response(response.body, {
         status: response.status,
-        headers: response.headers,
+        headers: responseHeaders,
       });
     } catch (error: any) {
+      const status = error.message.startsWith('Forbidden') ? 403 : 502;
       logger.error({ error: error.message, url }, 'Proxy Error');
       return c.json(
-        { error: 'Failed to forward request', details: error.message },
-        502,
+        { error: 'Proxy Request Failed', details: error.message },
+        status,
       );
     }
   },

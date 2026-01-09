@@ -1,8 +1,7 @@
 import { logger } from './logger.js';
 
 const REQUIRED_ENV_VARS = [
-  'SUPABASE_URL',
-  'SUPABASE_ANON_KEY',
+  'DATABASE_URL',
   'UPSTASH_REDIS_URL',
   'UPSTASH_REDIS_TOKEN',
 ];
@@ -15,14 +14,21 @@ export function validateConfig() {
       { missing },
       'Missing required environment variables. Application may not function correctly.',
     );
-    // In a real production app, we might want to exit here
-    // process.exit(1);
+  }
+
+  if (!process.env.ALLOWED_DOMAINS) {
+    logger.warn(
+      'ALLOWED_DOMAINS is not set. The gateway will block all requests by default or allow all if configured. Please set it for production.',
+    );
   } else {
     logger.info('Environment configuration validated successfully.');
   }
 }
 
 export const config = {
-  port: process.env.PORT || 3000,
+  port: parseInt(process.env.PORT || '3000', 10),
   isDev: process.env.NODE_ENV !== 'production',
+  allowedDomains: process.env.ALLOWED_DOMAINS
+    ? process.env.ALLOWED_DOMAINS.split(',').map((d) => d.trim().toLowerCase())
+    : [],
 };

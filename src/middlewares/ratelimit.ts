@@ -17,14 +17,17 @@ export const rateLimitMiddleware = async (
   const key = `ratelimit:${apiKeyInfo.id}:${Math.floor(Date.now() / 60000)}`;
 
   try {
-    const current = await redis.incr(key);
+    const current = await (redis as any).incr(key);
 
     if (current === 1) {
-      await redis.expire(key, 60);
+      await (redis as any).expire(key, 60);
     }
 
     if (current > limit) {
-      logger.warn({ apiKeyId: apiKeyInfo.id, limit }, 'Rate limit exceeded');
+      logger.warn(
+        { api_key_id: apiKeyInfo.id, rate_limit: limit },
+        'Rate limit exceeded',
+      );
       return c.json(
         {
           error: 'Too Many Requests',
@@ -34,12 +37,10 @@ export const rateLimitMiddleware = async (
       );
     }
 
-    // Set headers for transparency
     c.header('X-RateLimit-Limit', limit.toString());
     c.header('X-RateLimit-Remaining', Math.max(0, limit - current).toString());
   } catch (error) {
     logger.error({ error }, 'Redis Rate Limit Error');
-    // Fail open if Redis is down
   }
 
   await next();

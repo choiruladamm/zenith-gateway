@@ -1,5 +1,6 @@
 import { Context, Next } from 'hono';
-import { supabase } from '../services/supabase.js';
+import { db } from '../db/index.js';
+import { usageLogs } from '../db/schema.js';
 import { logger } from '../services/logger.js';
 import { Variables } from '../types/index.js';
 
@@ -16,7 +17,7 @@ export const usageMiddleware = async (
 
   if (!apiKeyInfo) return;
 
-  const logData = {
+  const log_data = {
     key_id: apiKeyInfo.id,
     endpoint: c.req.path,
     method: c.req.method,
@@ -24,26 +25,17 @@ export const usageMiddleware = async (
     latency_ms: duration,
   };
 
-  // Asynchronous logging to Supabase
-  // We use the full promise chain properly to avoid lint issues with PromiseLike
   (async () => {
     try {
-      const { error } = await supabase.from('usage_logs').insert(logData);
-      if (error) {
-        logger.error(
-          { error: error.message, apiKeyId: apiKeyInfo.id },
-          'Usage logging failed',
-        );
-      } else {
-        logger.info(
-          { apiKeyId: apiKeyInfo.id, duration: `${duration} ms` },
-          'Usage logged successfully',
-        );
-      }
+      await db.insert(usageLogs).values(log_data);
+      logger.info(
+        { api_key_id: apiKeyInfo.id, latency_ms: duration },
+        'Usage logged successfully',
+      );
     } catch (err: any) {
       logger.error(
-        { error: err.message, apiKeyId: apiKeyInfo.id },
-        'Usage logging unhandled error',
+        { error: err.message, api_key_id: apiKeyInfo.id },
+        'Usage logging failed',
       );
     }
   })();
