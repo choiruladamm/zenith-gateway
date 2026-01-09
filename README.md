@@ -1,29 +1,39 @@
 # Zenith Gateway
 
-Zenith is a lightweight API Gateway/Proxy implementation built on **Hono**, **Bun**, and **Drizzle ORM**. It provides a centralized layer for authentication, tiered rate limiting, and asynchronous usage tracking.
+Zenith is a centralized API Gateway implementation built to secure and monitor downstream services. It employs a facade pattern to handle authentication, rate limiting, and observability before forwarding requests to backend systems.
 
-## Technical Highlights
+## Core Architecture & Features
 
-- **SSRF Protection**: Built-in domain allowlist and header sanitization to prevent unauthorized internal requests.
-- **Node-less Performance**: Leverages Bun's native `fetch` and `crypto` for high throughput and low memory footprint.
-- **Full Request Streaming**: Implemented with `duplex: 'half'` to handle large payloads (e.g., file uploads or AI completions) without buffering.
-- **Async Usage Logging**: Request telemetry is pushed to PostgreSQL out-of-band to minimize response latency.
-- **Distributed Rate Limiting**: Uses Upstash Redis for atomic counter increments across multiple serverless or containerized instances.
+### Centralized Authentication
 
-## Why Redis?
+**The Problem**: Managing authentication logic across disparate microservices leads to code duplication and security fragmentation.
+**The Solution**: Zenith validates requests at the edge. Clients authenticate once with a Zenith API Key, and the gateway handles the handshake.
+**Implementation**: Requests are validated against SHA-256 hashed keys stored in PostgreSQL.
 
-We use Redis exclusively for state management in the `rateLimitMiddleware`.
+### Tiered Rate Limiting
 
-- **Latency**: We need sub-millisecond lookups for every request to avoid gateway bottlenecks.
-- **Persistence**: Using Redis TTL ensures that rate-limit windows are automatically purged without manual cleanup or database overhead.
+**The Problem**: Protecting upstream resources (like expensive LLM APIs) from abuse requires precise quota management.
+**The Solution**: A sliding-window rate limiter utilizing Redis for atomic counters.
+**Implementation**: Limits are dynamically reduced based on the "Plan" attached to the API Key (e.g., 60 RPM for Basic vs. 10k RPM for Enterprise).
 
-## Stack
+### Asynchronous Telemetry
 
-- **Runtime**: [Bun](https://bun.sh)
-- **Framework**: [Hono](https://hono.dev)
-- **Database**: PostgreSQL + [Drizzle ORM](https://orm.drizzle.team)
-- **State Store**: [Upstash Redis](https://upstash.com)
-- **Logging**: [Pino](https://getpino.io)
+**The Problem**: Synchronous logging blocks the event loop and adds latency to the user response.
+**The Solution**: Usage logs are dispatched asynchronously (out-of-band) after the response is sent to the client.
+**Implementation**: Captures latency, status codes, and endpoint usage for billing and analytics without impacting throughput.
+
+### SSRF Protection
+
+**The Problem**: Open proxies are vulnerable to Server-Side Request Forgery, exposing internal networks.
+**The Solution**: Strict validation of target hostnames against a pre-defined Allowlist.
+**Implementation**: Requests to non-allowed domains (like `localhost` or internal IPs) are rejected with a 403 Forbidden before DNS resolution.
+
+## Technical Stack
+
+- **Runtime**: Bun (for native `fetch` performance)
+- **Framework**: Hono (Web Standards compliant)
+- **State Store**: Upstash Redis (High-performance counters)
+- **Database**: PostgreSQL + Drizzle ORM (Configuration & Logs)
 
 ## Quick Start
 
@@ -35,7 +45,7 @@ bun install
 
 ### 2. Configuration
 
-Copy `.env.example` and populate your database and Redis credentials:
+Copy `.env.example` and set your credentials:
 
 ```bash
 cp .env.example .env
@@ -43,79 +53,46 @@ cp .env.example .env
 
 ### 3. Database Initialization
 
-Sync the schema and seed default plans/test keys:
+Sync the schema and seed default data:
 
 ```bash
 bun run db:push
 bun run db:seed
 ```
 
-### 4. API Key Generation
+### 4. Generate API Key
 
-Keys are stored as SHA-256 hashes. Use the CLI script to generate new secure keys:
+Use the CLI to generate a cryptographically secure key:
 
 ```bash
-bun run db:generate-key "client-name"
+bun run db:generate-key "client-identifier"
 ```
 
 ## Usage
 
-Requests should be proxied through the `/proxy/` endpoint with a valid `X-Zenith-Key` header.
+Proxy requests by appending the target URL to the `/proxy/` path and including the `X-Zenith-Key` header.
 
 ```bash
 curl -H "X-Zenith-Key: <YOUR_KEY>" \
      "http://localhost:3000/proxy/httpbin.org/get"
 ```
 
-For more details on headers, metrics, and error codes, see [USAGE.md](USAGE.md).
+## Production Build
 
-## Production Deployment
-
-### 1. Build
-
-Compile the project into a optimized Bun binary:
+Compile the project into a strict Bun binary:
 
 ```bash
 bun run build
+bun start
 ```
 
-### 2. Runtime Environment
+### Docker
 
-Ensure the following are configured in your production environment:
-
-- **`NODE_ENV`**: Set to `production`.
-- **`ALLOWED_DOMAINS`**: List your production target domains (e.g., `api.myapp.com`).
-- **Database**: Use a managed Postgres instance (e.g., Neon, AWS RDS).
-- **Redis**: Use Upstash Redis for global rate-limiting.
-
-### 3. Run
-
-Start the compiled production server:
+The project includes a multi-stage Dockerfile optimized for the `oven/bun` runtime.
 
 ```bash
-bun start # or bun run dist/index.js
+docker build -t zenith-gateway .
 ```
-
-### Docker (Recommended)
-
-You can use the official `oven/bun` image for containerized deployment:
-
-```dockerfile
-FROM oven/bun:latest
-WORKDIR /app
-COPY . .
-RUN bun install --production
-RUN bun run build
-EXPOSE 3000
-CMD ["bun", "dist/index.js"]
-```
-
-## Project Structure
-
-- `src/middlewares/`: Core gateway logic (Auth, Rate Limit, Usage).
-- `src/db/`: Persistence layer, schema, and migration scripts.
-- `src/services/`: Client wrappers for Redis, Logger, and Proxy handlers.
-- `scripts/`: Development and maintenance utilities.
 
 ## License
 
