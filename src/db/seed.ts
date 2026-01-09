@@ -9,14 +9,11 @@ async function seed() {
   logger.info('🌱 Starting database seeding...');
 
   try {
-    logger.info('Cleaning up existing data...');
-
     await db.execute(
       sql`TRUNCATE TABLE usage_logs, api_keys, organizations, plans CASCADE`,
     );
     logger.info('✅ Database cleaned successfully.');
 
-    logger.info('Creating default plans...');
     const insertedPlans = await db
       .insert(plans)
       .values([
@@ -47,7 +44,6 @@ async function seed() {
       throw new Error('Failed to create Basic plan');
     }
 
-    logger.info('Creating default organization...');
     const [defaultOrg] = await db
       .insert(organizations)
       .values({
@@ -58,7 +54,6 @@ async function seed() {
     const testKey = 'zenith_test_key_123';
     const keyHash = await hashApiKey(testKey);
 
-    logger.info('Creating default test API key...');
     await db
       .insert(apiKeys)
       .values({

@@ -10,7 +10,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "bun --env-file=.env drizzle-kit push",
     "db:migrate": "bun --env-file=.env drizzle-kit migrate",
-    "db:seed": "bun --env-file=.env run src/db/seed.ts"
+    "db:seed": "bun --env-file=.env run src/db/seed.ts",
+    "db:generate-key": "bun --env-file=.env run scripts/generate-key.ts"
   },
   "keywords": [],
   "author": "",
