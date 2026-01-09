@@ -17,7 +17,7 @@ export const usageMiddleware = async (
   if (!apiKeyInfo) return;
 
   const logData = {
-    api_key_id: apiKeyInfo.id,
+    key_id: apiKeyInfo.id,
     endpoint: c.req.path,
     method: c.req.method,
     status_code: c.res.status,
@@ -35,8 +35,8 @@ export const usageMiddleware = async (
           'Usage logging failed',
         );
       } else {
-        logger.debug(
-          { apiKeyId: apiKeyInfo.id, duration },
+        logger.info(
+          { apiKeyId: apiKeyInfo.id, duration: `${duration} ms` },
           'Usage logged successfully',
         );
       }
