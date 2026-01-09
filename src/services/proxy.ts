@@ -1,5 +1,6 @@
 import { logger } from './logger.js';
 import { config } from './config.js';
+import { HEADERS } from '../constants/index.js';
 
 const DISALLOWED_HEADERS = [
   'host',
@@ -11,7 +12,7 @@ const DISALLOWED_HEADERS = [
   'trailer',
   'transfer-encoding',
   'upgrade',
-  'x-zenith-key',
+  HEADERS.API_KEY.toLowerCase(),
 ];
 
 export const forwardRequest = async (url: string, request: Request) => {

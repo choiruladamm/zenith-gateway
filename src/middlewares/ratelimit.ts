@@ -2,6 +2,7 @@ import { Context, Next } from 'hono';
 import { redis } from '../services/redis.js';
 import { logger } from '../services/logger.js';
 import { Variables } from '../types/index.js';
+import { HEADERS, REDIS_KEYS, TIME } from '../constants/index.js';
 
 export const rateLimitMiddleware = async (
   c: Context<{ Variables: Variables }>,
@@ -10,17 +11,18 @@ export const rateLimitMiddleware = async (
   const apiKeyInfo = c.get('apiKeyInfo');
   if (!apiKeyInfo || !redis) return await next();
 
-  const plan = apiKeyInfo.plans; // Joined in authMiddleware
+  const plan = apiKeyInfo.plans;
   if (!plan) return await next();
 
   const limit = plan.rate_limit_per_min;
-  const key = `ratelimit:${apiKeyInfo.id}:${Math.floor(Date.now() / 60000)}`;
+  // Key format: ratelimit:<key_id>:<minute_timestamp>
+  const key = `${REDIS_KEYS.RATELIMIT_PREFIX}:${apiKeyInfo.id}:${Math.floor(Date.now() / TIME.ONE_MINUTE_IN_MS)}`;
 
   try {
-    const current = await (redis as any).incr(key);
+    const current = await redis.incr(key);
 
     if (current === 1) {
-      await (redis as any).expire(key, 60);
+      await redis.expire(key, TIME.ONE_MINUTE_IN_SECONDS);
     }
 
     if (current > limit) {
@@ -37,8 +39,11 @@ export const rateLimitMiddleware = async (
       );
     }
 
-    c.header('X-RateLimit-Limit', limit.toString());
-    c.header('X-RateLimit-Remaining', Math.max(0, limit - current).toString());
+    c.header(HEADERS.RATELIMIT_LIMIT, limit.toString());
+    c.header(
+      HEADERS.RATELIMIT_REMAINING,
+      Math.max(0, limit - current).toString(),
+    );
   } catch (error) {
     logger.error({ error }, 'Redis Rate Limit Error');
   }
