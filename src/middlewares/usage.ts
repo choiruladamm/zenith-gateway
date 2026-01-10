@@ -1,9 +1,19 @@
 import { Context, Next } from 'hono';
-import { db } from '../db/index.js';
-import { usageLogs } from '../db/schema.js';
 import { logger } from '../services/logger.js';
 import { Variables } from '../types/index.js';
+import { redis } from '../services/redis.js';
+import { REDIS_KEYS } from '../constants/index.js';
 
+/**
+ * Middleware that tracks and logs request usage for analytics and billing.
+ *
+ * Performance design:
+ * 1. Measures 'latency_ms' by wrapping the 'next()' call.
+ * 2. Aggregates request metadata (path, method, status) after completion.
+ * 3. Fire-and-Forget: Pushes log data to a Redis queue asynchronously.
+ *    This ensures that database persistence doesn't block the client response.
+ *    The 'worker' service will later dequeue and batch-insert these logs.
+ */
 export const usageMiddleware = async (
   c: Context<{ Variables: Variables }>,
   next: Next,
@@ -25,18 +35,20 @@ export const usageMiddleware = async (
     latency_ms: duration,
   };
 
-  (async () => {
-    try {
-      await db.insert(usageLogs).values(log_data);
-      logger.info(
-        { api_key_id: apiKeyInfo.id, latency_ms: duration },
-        'Usage logged successfully',
-      );
-    } catch (err: any) {
-      logger.error(
-        { error: err.message, api_key_id: apiKeyInfo.id },
-        'Usage logging failed',
-      );
-    }
-  })();
+  if (redis) {
+    (async () => {
+      try {
+        await redis.lpush(REDIS_KEYS.USAGE_LOG_QUEUE, JSON.stringify(log_data));
+        logger.debug(
+          { api_key_id: apiKeyInfo.id, latency_ms: duration },
+          'Usage queued for batch processing',
+        );
+      } catch (err: any) {
+        logger.error(
+          { error: err.message, api_key_id: apiKeyInfo.id },
+          'Failed to queue usage log',
+        );
+      }
+    })();
+  }
 };

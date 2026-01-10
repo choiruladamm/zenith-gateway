@@ -6,6 +6,9 @@ export const HEADERS = {
 
 export const REDIS_KEYS = {
   RATELIMIT_PREFIX: 'ratelimit',
+  API_KEY_CACHE_PREFIX: 'apikey_cache',
+  USAGE_LOG_QUEUE: 'usage_logs_buffer',
+  MONTHLY_USAGE_PREFIX: 'usage:monthly',
 };
 
 export const TIME = {
