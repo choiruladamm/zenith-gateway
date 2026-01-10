@@ -4,6 +4,7 @@ export interface Plan {
   rate_limit_per_min: number;
   monthly_quota: number;
   price_per_1k_req: number;
+  allowed_paths: string[] | null;
 }
 
 export interface ApiKey {

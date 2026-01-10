@@ -22,18 +22,21 @@ async function seed() {
           rate_limit_per_min: 60,
           monthly_quota: 10000,
           price_per_1k_req: '0.50',
+          allowed_paths: ['*'],
         },
         {
           name: 'Pro',
           rate_limit_per_min: 1000,
           monthly_quota: 1000000,
           price_per_1k_req: '0.10',
+          allowed_paths: ['*'],
         },
         {
           name: 'Enterprise',
           rate_limit_per_min: 10000,
           monthly_quota: 100000000,
           price_per_1k_req: '0.05',
+          allowed_paths: ['*'],
         },
       ])
       .returning();

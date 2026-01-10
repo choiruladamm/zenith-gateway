@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { authMiddleware } from './middlewares/auth.js';
 import { usageMiddleware } from './middlewares/usage.js';
 import { rateLimitMiddleware } from './middlewares/ratelimit.js';
+import { accessMiddleware } from './middlewares/access.js';
 import { forwardRequest } from './services/proxy.js';
 import { logger } from './services/logger.js';
 import { Variables } from './types/index.js';
@@ -18,6 +19,7 @@ app.get('/health', (c) => {
 app.all(
   '/proxy/*',
   authMiddleware,
+  accessMiddleware,
   rateLimitMiddleware,
   usageMiddleware,
   async (c) => {

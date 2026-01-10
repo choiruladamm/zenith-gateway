@@ -33,6 +33,7 @@ export const authMiddleware = async (
           rate_limit_per_min: plans.rate_limit_per_min,
           monthly_quota: plans.monthly_quota,
           price_per_1k_req: plans.price_per_1k_req,
+          allowed_paths: plans.allowed_paths,
         },
       })
       .from(apiKeys)

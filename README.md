@@ -1,99 +1,84 @@
 # Zenith Gateway
 
-Zenith is a centralized API Gateway implementation built to secure and monitor downstream services. It employs a facade pattern to handle authentication, rate limiting, and observability before forwarding requests to backend systems.
+Zenith is a high-performance API Gateway built on **Bun** and **Hono**, designed as a security and observability facade for your upstream services. It handles the "boring" parts of API management—authentication, tiered access, rate limiting, and telemetry—so you can focus on building your core features.
 
-## Core Architecture & Features
+## Why Zenith?
 
-### Centralized Authentication
+Most gateways are either too heavy (Kong, Apigee) or too simple (basic reverse proxies). Zenith hits the sweet spot: small enough to be understood in an afternoon, but robust enough for production traffic with features like SSRF protection and asynchronous logging.
 
-**The Problem**: Managing authentication logic across disparate microservices leads to code duplication and security fragmentation.
-**The Solution**: Zenith validates requests at the edge. Clients authenticate once with a Zenith API Key, and the gateway handles the handshake.
-**Implementation**: Requests are validated against SHA-256 hashed keys stored in PostgreSQL.
+## Core Features
 
-### Tiered Rate Limiting
+### 1. Unified Authentication & Auth Caching
 
-**The Problem**: Protecting upstream resources (like expensive LLM APIs) from abuse requires precise quota management.
-**The Solution**: A sliding-window rate limiter utilizing Redis for atomic counters.
-**Implementation**: Limits are dynamically reduced based on the "Plan" attached to the API Key (e.g., 60 RPM for Basic vs. 10k RPM for Enterprise).
+Clients authenticate using a plan-based API Key (`X-Zenith-Key`). To minimize database overhead, Zenith uses a **Redis-backed cache-aside pattern**. The system hashes keys with SHA-256 and caches the plan metadata for 5 minutes, ensuring sub-millisecond auth checks for hot traffic.
 
-### Asynchronous Telemetry
+### 2. Tiered Access Controller (New 🚀)
 
-**The Problem**: Synchronous logging blocks the event loop and adds latency to the user response.
-**The Solution**: Usage logs are dispatched asynchronously (out-of-band) after the response is sent to the client.
-**Implementation**: Captures latency, status codes, and endpoint usage for billing and analytics without impacting throughput.
+Enforce granular path-based permissions at the plan level. You can restrict certain API keys to specific endpoints or allow full access using wildcards.
 
-### SSRF Protection
+- **Example**: A "Basic" plan might only access `/v1/public/*`, while "Enterprise" gets `/v1/*`.
+- **Logic**: Path matching supports exact strings and suffix wildcards.
 
-**The Problem**: Open proxies are vulnerable to Server-Side Request Forgery, exposing internal networks.
-**The Solution**: Strict validation of target hostnames against a pre-defined Allowlist.
-**Implementation**: Requests to non-allowed domains (like `localhost` or internal IPs) are rejected with a 403 Forbidden before DNS resolution.
+### 3. Distributed Rate Limiting & Quotas
+
+Zenith implements a dual-layer protection system using Redis:
+
+- **Per-minute limits**: Sliding window rate limiting to prevent sudden spikes.
+- **Monthly Quotas**: Hard enforcement of monthly usage limits based on the user's Tier.
+
+### 4. High-Throughput Asynchronous Telemetry
+
+Observability shouldn't slow down your requests. Zenith uses a **Fire-and-Forget + Worker** strategy:
+
+1. The gateway calculates latency and pushes a JSON log to a Redis queue.
+2. A background worker batches these logs and performs bulk inserts into PostgreSQL every 10 seconds.
+   This decouples hot-path proxying from database write latency.
+
+### 5. Production-Grade SSRF Protection
+
+To prevent Server-Side Request Forgery, Zenith:
+
+- Resolves hostnames to IPs and rejects requests targeting **private/internal IP ranges**.
+- Validates target domains against a strict **allowlist**.
+- Strips sensitive internal headers (like `X-Zenith-Key`) before forwarding to the upstream.
 
 ## Technical Stack
 
-- **Runtime**: Bun (for native `fetch` performance)
-- **Framework**: Hono (Web Standards compliant)
-- **State Store**: Upstash Redis (High-performance counters)
-- **Database**: PostgreSQL + Drizzle ORM (Configuration & Logs)
+- **Runtime**: [Bun](https://bun.sh/) (Native fetch & high performance)
+- **Framework**: [Hono](https://hono.dev/) (Web standards compliant)
+- **State/Cache**: Upstash Redis
+- **Database**: PostgreSQL (Neon/Local) with Drizzle ORM
+- **Logging**: Pino with batch processing
 
-## Quick Start
-
-### 1. Installation
+## Quick Setup
 
 ```bash
+# 1. Install dependencies
 bun install
-```
 
-### 2. Configuration
-
-Copy `.env.example` and set your credentials:
-
-```bash
+# 2. Setup environment (check [USAGE.md](USAGE.md) for details)
 cp .env.example .env
-```
 
-### 3. Database Initialization
-
-Sync the schema and seed default data:
-
-```bash
+# 3. Initialize Database (Agnostic /drizzle structure)
 bun run db:push
 bun run db:seed
+
+# 4. Fire it up
+bun run dev
 ```
 
-### 4. Generate API Key
+## Documentation
 
-Use the CLI to generate a cryptographically secure key:
+For detailed configuration, tiered access examples, and status code explanations, please refer to the [USAGE.md](USAGE.md) file.
 
-```bash
-bun run db:generate-key "client-identifier"
-```
+## Performance & Testing
 
-## Usage
-
-Proxy requests by appending the target URL to the `/proxy/` path and including the `X-Zenith-Key` header.
+The gateway is built with performance as a first-class citizen. Running `bun test` ensures that all layers—from SSRF protection to tiered access—are working correctly under load.
 
 ```bash
-curl -H "X-Zenith-Key: <YOUR_KEY>" \
-     "http://localhost:3000/proxy/httpbin.org/get"
-```
-
-## Production Build
-
-Compile the project into a strict Bun binary:
-
-```bash
-bun run build
-bun start
-```
-
-### Docker
-
-The project includes a multi-stage Dockerfile optimized for the `oven/bun` runtime.
-
-```bash
-docker build -t zenith-gateway .
+bun test src/index.test.ts
 ```
 
 ## License
 
-MIT
+MIT - Build something cool.

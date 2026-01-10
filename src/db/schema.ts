@@ -28,6 +28,7 @@ export const plans = pgTable('plans', {
     precision: 10,
     scale: 2,
   }).notNull(),
+  allowed_paths: text('allowed_paths').array(),
   created_at: timestamp('created_at').defaultNow(),
 });
 

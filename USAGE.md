@@ -1,99 +1,89 @@
-# Zenith Gateway Documentation
+# Zenith Gateway: Developer Guide
 
-This guide covers the technical implementation details for configuring and interacting with the Zenith Gateway.
+This guide details how to configure, run, and interact with the Zenith Gateway.
 
-## Environment Configuration
+## 1. Environment Configuration
 
-Configure your `.env` file with the following required variables:
+Zenith requires the following environment variables. See `.env.example` for a template.
 
-```bash
-# PostgreSQL Connection (compatible with Neon, RDS, or local pg)
-DATABASE_URL=postgres://user:password@localhost:5432/zenith_db
+| Variable              | Description                                 | Example                  |
+| :-------------------- | :------------------------------------------ | :----------------------- |
+| `DATABASE_URL`        | Postgres connection string (Neon/RDS/Local) | `postgres://...`         |
+| `UPSTASH_REDIS_URL`   | Redis REST API URL                          | `https://...`            |
+| `UPSTASH_REDIS_TOKEN` | Redis Access Token                          | `...`                    |
+| `ALLOWED_DOMAINS`     | Comma-separated list of safe target domains | `openai.com,httpbin.org` |
 
-# Upstash Redis for Rate Limiting
-UPSTASH_REDIS_URL=your_redis_url
-UPSTASH_REDIS_TOKEN=your_redis_token
+> [!TIP]
+> Setting `ALLOWED_DOMAINS` is critical for production safety. If empty, the gateway handles this based on your `src/services/config.ts` defaults (usually restrictive).
 
-# App Port
-PORT=3000
+## 2. Database & Migrations
 
-# SSRF Protection: Comma-separated allowlist of target hostnames
-ALLOWED_DOMAINS=openai.com,httpbin.org,jsonplaceholder.typicode.com
-```
+We use **Drizzle Kit** for a provider-agnostic database experience. Migrations are stored in `./drizzle`.
 
-## Database Management
+- **Push Schema**: Immediately sync schema to DB (Dev/Stage)
+  ```bash
+  bun run db:push
+  ```
+- **Seed Data**: Populates default tiers (`Basic`, `Pro`, `Enterprise`) and a test key
+  ```bash
+  bun run db:seed
+  ```
 
-We use **Drizzle ORM** for schema synchronization and data seeding.
+## 3. Tiered Access Control (Path Permissioning)
 
-### Push Schema
+Zenith allows you to restrict access based on the request path. These rules are defined in the `plans` table's `allowed_paths` column.
 
-To sync your local schema definitions with the database instance:
+### Matcher Logic
 
-```bash
-bun run db:push
-```
+- **Exact Match**: `/api/v1/users` (only permits this specific path).
+- **Wildcard Match**: `/api/v1/*` (permits anything starting with `/api/v1/`).
+- **Unrestricted**: `*` (permits any path for that domain).
 
-### Initial Data & Tests
+### Use Case
 
-To populate default plans (`Basic`, `Pro`, `Enterprise`) and create an initial test key:
+You can have a **Public Plan** restricted to `['/v1/public/*']` and a **Premium Plan** allowed to access `['*']`.
 
-```bash
-bun run db:seed
-```
+## 4. Interaction (The Proxy Endpoint)
 
-_Note: This creates a default key `zenith_test_key_123` for immediate testing._
+The gateway exposes a single dynamic proxy route: `/proxy/*`.
 
-### API Key Generation
+### Format
 
-Access keys are SHA-256 hashed. Do not insert keys manually. Use the CLI tool:
+`ANY http://localhost:3000/proxy/{TARGET_URL}`
 
-```bash
-bun run db:generate-key "optional-label"
-```
-
-## Making Requests
-
-Zenith acts as a pass-through proxy. It expects the target URL to be appended to the `/proxy/` path.
-
-### Request Format
-
-- **Endpoint**: `ANY /proxy/<TARGET_URL>`
-- **Header**: `X-Zenith-Key: <PLAIN_TEXT_KEY>`
-
-### Example Construction
+### Example Request
 
 ```bash
-curl -X GET \
-  -H "X-Zenith-Key: zenith_test_key_123" \
-  "http://localhost:3000/proxy/httpbin.org/get"
+curl -X POST "http://localhost:3000/proxy/api.openai.com/v1/chat/completions" \
+     -H "X-Zenith-Key: <YOUR_API_KEY>" \
+     -H "Content-Type: application/json" \
+     -d '{"model": "gpt-4", "messages": [...]}'
 ```
 
-The gateway automatically handles protocol prepending (defaults to `https://`) if not specified in the target URL.
+**What happens under the hood?**
 
-## Gateway Response Headers
+1. Auth check (Redis cache hit/miss).
+2. Tiered Path check (matches `api.openai.com/v1/chat/completions` against allowed patterns).
+3. Rate Limit check.
+4. SSRF Check (Hostname to IP resolution).
+5. Forwarding (GET/HEAD requests automatically **retry up to 2x** on failure).
 
-Every proxied request returns rate-limit metadata injected by the `rateLimitMiddleware`:
+## 5. Understanding Status Codes
 
-- `X-RateLimit-Limit`: Maximum requests permitted per 1-minute window.
-- `X-RateLimit-Remaining`: Remaining allowance in the current window.
+Zenith uses standard codes to signal specific gateway failures:
 
-## HTTP Status Codes
+- **401 Unauthorized**: Missing or invalid `X-Zenith-Key`.
+- **403 Forbidden**:
+  - Hostname failed `ALLOWED_DOMAINS` check.
+  - Target resolved to a **private/internal IP**.
+  - Request path is **not permitted** by the API Key's tier.
+- **429 Too Many Requests**: Monthly quota or per-minute rate limit hit.
+- **502 Bad Gateway**: Upstream service is down after all retry attempts.
 
-The gateway implements the following specific status codes:
+## 6. Observability
 
-| Code    | Status            | Logic / Trigger                                           |
-| :------ | :---------------- | :-------------------------------------------------------- |
-| **200** | OK                | Upstream request resolved successfully.                   |
-| **401** | Unauthorized      | Invalid key or missing `X-Zenith-Key` header.             |
-| **403** | Forbidden         | Hostname failed SSRF allowlist check (`ALLOWED_DOMAINS`). |
-| **429** | Too Many Requests | Rate limit exceeded (managed by Redis).                   |
-| **502** | Bad Gateway       | Upstream target is unreachable or timed out.              |
+Logs are batched and stored in the `usage_logs` table. You can query this table for:
 
-## Telemetry & Logging
-
-Asynchronous usage tracking is performed on every successful request. Records are persisted to the `usage_logs` table with the following data points:
-
-- `key_id`: Reference to the authenticating API Key.
-- `latency_ms`: Round-trip time of the upstream request.
-- `status_code`: HTTP status returned from the target.
-- `endpoint/method`: Target request metadata.
+- **Latency Analysis**: `latency_ms` per endpoint.
+- **Billing**: Count requests per `key_id`.
+- **Error Rates**: Status codes distribution per upstream provider.
