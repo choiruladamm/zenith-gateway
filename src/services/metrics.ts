@@ -7,11 +7,15 @@ import { REDIS_KEYS } from '../constants/index.js';
 export class MetricsService {
   private static instance: MetricsService;
 
-  // Labeled counters: Map<"method=GET,status=200,target=...", count>
+  /**
+   * Labeled counters: Map<"method=GET,status=200,target=...", count>
+   */
   private requests = new Map<string, number>();
   private errors = new Map<string, number>();
 
-  // Latency tracking: Map<target, { sum: number, count: number }>
+  /**
+   * Latency tracking: Map<target, { sum: number, count: number }>
+   */
   private latencies = new Map<string, { sum: number; count: number }>();
 
   private constructor() {}
@@ -21,6 +25,15 @@ export class MetricsService {
       MetricsService.instance = new MetricsService();
     }
     return MetricsService.instance;
+  }
+
+  /**
+   * Resets all metrics. Useful for testing.
+   */
+  public reset() {
+    this.requests.clear();
+    this.errors.clear();
+    this.latencies.clear();
   }
 
   /**
@@ -35,16 +48,18 @@ export class MetricsService {
     const isError = status >= 400;
     const labelKey = `method="${method}",status="${status}",target="${target}"`;
 
-    // Increment request counter
     this.requests.set(labelKey, (this.requests.get(labelKey) || 0) + 1);
 
     if (isError) {
       this.errors.set(labelKey, (this.errors.get(labelKey) || 0) + 1);
     }
 
-    // Track latency
+    /**
+     * Track latency.
+     * Store in seconds (Prometheus standard).
+     */
     const lat = this.latencies.get(target) || { sum: 0, count: 0 };
-    lat.sum += durationMs / 1000; // Store in seconds (Prometheus standard)
+    lat.sum += durationMs / 1000;
     lat.count++;
     this.latencies.set(target, lat);
   }

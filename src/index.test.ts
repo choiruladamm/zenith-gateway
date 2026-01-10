@@ -53,7 +53,8 @@ describe('Zenith Gateway', () => {
     );
     expect(res.status).toBe(403);
     const body = await res.json();
-    expect(body.details).toContain('blocked');
+    expect(body.detail).toContain('blocked');
+    expect(body.type).toContain('forbidden');
   });
 
   test('Usage batching: should push to Redis', async () => {
@@ -94,36 +95,52 @@ describe('Zenith Gateway', () => {
   test('Monthly Quota Enforcement (Mock Test)', async () => {
     const { redis } = await import('./services/redis.js');
     const { REDIS_KEYS } = await import('./constants/index.js');
+    const { hashApiKey } = await import('./utils/crypto.js');
+    const { db } = await import('./db/index.js');
+    const { apiKeys } = await import('./db/schema.js');
+    const { eq } = await import('drizzle-orm');
 
     if (redis) {
       const now = new Date();
+      const testKey = 'zenith_test_key_123';
+      const hashed = await hashApiKey(testKey);
 
-      const keyId = 'c8636497-a91c-4e4d-8622-a2a82c9ea211';
+      // Fetch dynamic ID
+      const [keyRecord] = await db
+        .select()
+        .from(apiKeys)
+        .where(eq(apiKeys.key_hash, hashed));
+
+      expect(keyRecord).toBeDefined();
+
+      const keyId = keyRecord.id;
       const monthKey = `${REDIS_KEYS.MONTHLY_USAGE_PREFIX}:${keyId}:${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-      await redis.set(monthKey, 1000000);
+      // Set quota exhausted
+      await redis.set(monthKey, 1000000000); // Massive number
 
-      const res = await app.fetch(
-        new Request(
-          'http://localhost/proxy/jsonplaceholder.typicode.com/todos/1',
-          {
-            headers: { 'X-Zenith-Key': 'zenith_test_key_123' },
-          },
-        ),
-      );
+      try {
+        const res = await app.fetch(
+          new Request(
+            'http://localhost/proxy/jsonplaceholder.typicode.com/todos/1',
+            {
+              headers: { 'X-Zenith-Key': testKey },
+            },
+          ),
+        );
 
-      expect(res.status).toBe(429);
-      const body = await res.json();
-      expect(body.error).toBe('Quota Exceeded');
-
-      await redis.del(monthKey);
+        expect(res.status).toBe(429);
+        const body = await res.json();
+        expect(body.title).toBe('Quota Exceeded');
+        expect(body.type).toContain('quota-exceeded');
+      } finally {
+        await redis.del(monthKey);
+      }
     }
   });
 
   describe('Tiered Access Controller', () => {
     test('Should ALLOW access to permitted exact path', async () => {
-      // Note: In seed.ts, zenith_test_key_123 has allowed_paths: ['*']
-      // Let's assume for this test we use the default seeded key.
       const res = await app.fetch(
         new Request(
           'http://localhost/proxy/jsonplaceholder.typicode.com/todos/1',
@@ -142,59 +159,75 @@ describe('Zenith Gateway', () => {
       const { eq } = await import('drizzle-orm');
       const { redis } = await import('./services/redis.js');
 
-      // 1. Create a restricted plan
-      const [restrictedPlan] = await db
-        .insert(plans)
-        .values({
-          name: 'Testing Restricted',
-          rate_limit_per_min: 10,
-          monthly_quota: 100,
-          price_per_1k_req: '1.00',
-          allowed_paths: ['/allowed/endpoint/*'],
-        })
-        .returning();
+      const planName = `Testing Restricted ${Date.now()}`;
+      let planId: string | undefined;
+      let keyId: string | undefined;
 
-      const [org] = await db
-        .insert(organizations)
-        .values({ name: 'Testing Org' })
-        .returning();
+      try {
+        /**
+         * Create a restricted plan
+         */
+        const [restrictedPlan] = await db
+          .insert(plans)
+          .values({
+            name: planName,
+            rate_limit_per_min: 10,
+            monthly_quota: 100,
+            price_per_1k_req: '1.00',
+            allowed_paths: ['/allowed/endpoint/*'],
+          })
+          .returning();
+        planId = restrictedPlan.id;
 
-      const restrictedKeyRaw = 'zenith_restricted_unit_test';
-      const [key] = await db
-        .insert(apiKeys)
-        .values({
-          org_id: org.id,
-          plan_id: restrictedPlan.id,
-          key_hash: await hashApiKey(restrictedKeyRaw),
-          hint: 'restricted_unit',
-          status: 'active',
-        })
-        .returning();
+        const [org] = await db
+          .insert(organizations)
+          .values({ name: 'Testing Org' })
+          .returning();
 
-      if (redis) await redis.flushall(); // Clear cache
+        const restrictedKeyRaw = `zenith_restricted_${Date.now()}`;
+        const [key] = await db
+          .insert(apiKeys)
+          .values({
+            org_id: org.id,
+            plan_id: restrictedPlan.id,
+            key_hash: await hashApiKey(restrictedKeyRaw),
+            hint: 'restricted_unit',
+            status: 'active',
+          })
+          .returning();
+        keyId = key.id;
 
-      // 2. Test forbidden path
-      const resForbidden = await app.fetch(
-        new Request('http://localhost/proxy/some-other-domain.com/secret', {
-          headers: { 'X-Zenith-Key': restrictedKeyRaw },
-        }),
-      );
-      expect(resForbidden.status).toBe(403);
-      const bodyForbidden = await resForbidden.json();
-      expect(bodyForbidden.error).toBe('Forbidden');
+        if (redis) await redis.flushall();
 
-      // 3. Test allowed path (wildcard)
-      const resAllowed = await app.fetch(
-        new Request('http://localhost/proxy/allowed/endpoint/resource/1', {
-          headers: { 'X-Zenith-Key': restrictedKeyRaw },
-        }),
-      );
-      // It should pass access check. 502/Failed to fetch is okay as the target doesn't exist.
-      expect(resAllowed.status).not.toBe(403);
+        /**
+         * Test forbidden path
+         */
+        const resForbidden = await app.fetch(
+          new Request('http://localhost/proxy/some-other-domain.com/secret', {
+            headers: { 'X-Zenith-Key': restrictedKeyRaw },
+          }),
+        );
 
-      // Cleanup
-      await db.delete(apiKeys).where(eq(apiKeys.id, key.id));
-      await db.delete(plans).where(eq(plans.id, restrictedPlan.id));
+        const bodyForbidden = await resForbidden.json();
+
+        expect(resForbidden.status).toBe(403);
+        expect(bodyForbidden.title).toBe('Forbidden');
+        expect(bodyForbidden.type).toContain('forbidden');
+
+        /**
+         * Test allowed path (wildcard)
+         */
+        const resAllowed = await app.fetch(
+          new Request('http://localhost/proxy/allowed/endpoint/resource/1', {
+            headers: { 'X-Zenith-Key': restrictedKeyRaw },
+          }),
+        );
+        expect(resAllowed.status).not.toBe(403);
+      } finally {
+        // Cleanup
+        if (keyId) await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        if (planId) await db.delete(plans).where(eq(plans.id, planId));
+      }
     });
   });
 
@@ -205,20 +238,23 @@ describe('Zenith Gateway', () => {
     // Temporarily set allowlist
     config.allowedDomains = ['trusted-api.com'];
 
-    const res = await app.fetch(
-      new Request('http://localhost/proxy/evil-domain.com/data', {
-        headers: {
-          'X-Zenith-Key': 'zenith_test_key_123',
-        },
-      }),
-    );
+    try {
+      const res = await app.fetch(
+        new Request('http://localhost/proxy/evil-domain.com/data', {
+          headers: {
+            'X-Zenith-Key': 'zenith_test_key_123',
+          },
+        }),
+      );
 
-    expect(res.status).toBe(403);
-    const body = await res.json();
-    expect(body.details).toContain('not in the allowlist');
-
-    // Restore
-    config.allowedDomains = originalAllowed;
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.detail).toContain('not in the allowlist');
+      expect(body.type).toContain('forbidden');
+    } finally {
+      // Restore
+      config.allowedDomains = originalAllowed;
+    }
   });
 
   test('Security: Internal headers should be stripped before forwarding', async () => {

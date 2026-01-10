@@ -1,4 +1,5 @@
 import { Context, Next } from 'hono';
+import { problems } from '../utils/problems.js';
 import { db } from '../db/index.js';
 import { apiKeys, plans } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
@@ -27,7 +28,7 @@ export const authMiddleware = async (
 
   if (!api_key) {
     logger.debug('Auth failed: Missing API Key');
-    return c.json({ error: 'Unauthorized: Missing API Key' }, 401);
+    return problems.unauthorized(c, 'Missing API Key');
   }
 
   try {
@@ -74,10 +75,7 @@ export const authMiddleware = async (
         },
         'Auth failed: Invalid or Inactive API Key',
       );
-      return c.json(
-        { error: 'Unauthorized: Invalid or Inactive API Key' },
-        401,
-      );
+      return problems.unauthorized(c, 'Invalid or Inactive API Key');
     }
 
     if (redis) {
@@ -91,9 +89,9 @@ export const authMiddleware = async (
     await next();
   } catch (err: any) {
     logger.error({ error: err.message }, 'Internal Auth Error');
-    return c.json(
-      { error: 'Internal Server Error during Authentication' },
-      500,
+    return problems.internalError(
+      c,
+      'Internal Server Error during Authentication',
     );
   }
 };

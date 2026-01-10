@@ -12,6 +12,7 @@ Zenith requires the following environment variables. See `.env.example` for a te
 | `UPSTASH_REDIS_URL`   | Redis REST API URL                          | `https://...`            |
 | `UPSTASH_REDIS_TOKEN` | Redis Access Token                          | `...`                    |
 | `ALLOWED_DOMAINS`     | Comma-separated list of safe target domains | `openai.com,httpbin.org` |
+| `PROBLEM_BASE_URL`    | Base URL for RFC 7807 problem types         | `https://api.myapp.com`  |
 
 > [!TIP]
 > Setting `ALLOWED_DOMAINS` is critical for production safety. If empty, the gateway handles this based on your `src/services/config.ts` defaults (usually restrictive).

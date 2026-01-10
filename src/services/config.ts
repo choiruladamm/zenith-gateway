@@ -40,4 +40,5 @@ export const config = {
   allowedDomains: process.env.ALLOWED_DOMAINS
     ? process.env.ALLOWED_DOMAINS.split(',').map((d) => d.trim().toLowerCase())
     : [],
+  problemBaseUrl: process.env.PROBLEM_BASE_URL || 'http://localhost:3000',
 };

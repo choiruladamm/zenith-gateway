@@ -1,4 +1,5 @@
 import { Context, Next } from 'hono';
+import { problems } from '../utils/problems.js';
 import { logger } from '../services/logger.js';
 import { Variables } from '../types/index.js';
 
@@ -58,12 +59,9 @@ export const accessMiddleware = async (
       'Access Blocked: Path not allowed by plan',
     );
 
-    return c.json(
-      {
-        error: 'Forbidden',
-        message: 'Your current plan does not grant access to this endpoint.',
-      },
-      403,
+    return problems.forbidden(
+      c,
+      'Your current plan does not grant access to this endpoint.',
     );
   }
 
