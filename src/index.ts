@@ -9,6 +9,8 @@ import { logger } from './services/logger.js';
 import { Variables } from './types/index.js';
 import { validateConfig, config } from './services/config.js';
 import { startWorker } from './services/worker.js';
+import { metricsMiddleware } from './middlewares/metrics.js';
+import { metrics } from './services/metrics.js';
 
 validateConfig();
 startWorker();
@@ -16,9 +18,15 @@ startWorker();
 const app = new Hono<{ Variables: Variables }>();
 
 app.use('*', secureHeaders());
+app.use('/proxy/*', metricsMiddleware);
 
 app.get('/health', (c) => {
   return c.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/metrics', async (c) => {
+  const data = await metrics.getMetrics();
+  return c.text(data);
 });
 
 /**
