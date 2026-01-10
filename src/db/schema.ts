@@ -41,7 +41,7 @@ export const apiKeys = pgTable('api_keys', {
   }),
   key_hash: text('key_hash').notNull().unique(),
   hint: text('hint').notNull(),
-  status: text('status').notNull().default('active'), // active, revoked, expired
+  status: text('status').notNull().default('active'),
   plan_id: uuid('plan_id').references(() => plans.id),
   created_at: timestamp('created_at').defaultNow(),
 });

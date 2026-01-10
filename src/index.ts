@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { secureHeaders } from 'hono/secure-headers';
 import { authMiddleware } from './middlewares/auth.js';
 import { usageMiddleware } from './middlewares/usage.js';
 import { rateLimitMiddleware } from './middlewares/ratelimit.js';
@@ -7,15 +8,29 @@ import { forwardRequest } from './services/proxy.js';
 import { logger } from './services/logger.js';
 import { Variables } from './types/index.js';
 import { validateConfig, config } from './services/config.js';
+import { startWorker } from './services/worker.js';
 
 validateConfig();
+startWorker();
 
 const app = new Hono<{ Variables: Variables }>();
+
+app.use('*', secureHeaders());
 
 app.get('/health', (c) => {
   return c.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+/**
+ * Main Proxy Route Handler
+ *
+ * This handler orchestrates the core gateway logic:
+ * 1. URL Resolution: Extracts the target upstream URL from the request path.
+ * 2. Protocol Normalization: Ensures the target URL uses a protocol (defaults to 'https://').
+ * 3. Middleware Execution: Auth, Rate Limiting, and Usage tracking are applied.
+ * 4. Header Merging: Carefully merges headers from the upstream response with headers
+ *    set by local middlewares (like security headers and ratelimit info).
+ */
 app.all(
   '/proxy/*',
   authMiddleware,
@@ -46,10 +61,8 @@ app.all(
     try {
       const response = await forwardRequest(url, c.req.raw);
 
-      // Forward headers from upstream, but filter them too if needed
       const responseHeaders = new Headers(response.headers);
 
-      // Merge headers from middlewares (e.g., rate-limit headers)
       c.res.headers.forEach((value, key) => {
         responseHeaders.set(key, value);
       });
