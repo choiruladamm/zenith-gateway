@@ -1,5 +1,6 @@
 import { expect, test, describe } from 'bun:test';
 import app from './index.js';
+import { config } from './services/config.js';
 
 describe('RFC 7807 Error Handling', () => {
   test('Missing API Key should return RFC 7807 Unauthorized', async () => {
@@ -11,7 +12,7 @@ describe('RFC 7807 Error Handling', () => {
     expect(res.status).toBe(401);
     expect(res.headers.get('Content-Type')).toBe('application/problem+json');
     expect(json).toEqual({
-      type: 'https://zenith.io/probs/unauthorized',
+      type: `${config.problemBaseUrl}/probs/unauthorized`,
       title: 'Unauthorized',
       status: 401,
       detail: 'Missing API Key',

@@ -1,7 +1,11 @@
-import { expect, test, describe } from 'bun:test';
+import { expect, test, describe, beforeEach } from 'bun:test';
 import app from './index.js';
+import { metrics } from './services/metrics.js';
 
 describe('Zenith Metrics', () => {
+  beforeEach(() => {
+    metrics.reset();
+  });
   test('GET /metrics should return Prometheus format with labels', async () => {
     const res = await app.fetch(new Request('http://localhost/metrics'));
     const text = await res.text();

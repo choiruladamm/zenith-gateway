@@ -3,6 +3,7 @@ import { redis } from '../services/redis.js';
 import { logger } from '../services/logger.js';
 import { Variables } from '../types/index.js';
 import { HEADERS, REDIS_KEYS, TIME } from '../constants/index.js';
+import { problems } from '../utils/problems.js';
 
 /**
  * Middleware that enforces both throughput limits and usage quotas.
@@ -14,6 +15,9 @@ import { HEADERS, REDIS_KEYS, TIME } from '../constants/index.js';
  *    via Redis INCR/EXPIRE. Ensures fair usage and prevents upstream saturation.
  *
  * Reports status via 'X-RateLimit-*' headers for client-side awareness.
+ *
+ * @param c - Hono Context
+ * @param next - Next middleware
  */
 const fallbackStore = new Map<string, { count: number; expiresAt: number }>();
 const FALLBACK_LIMIT = 100; // Requests per minute per IP when Redis is down
@@ -29,19 +33,18 @@ setInterval(() => {
   }
 }, CLEANUP_INTERVAL);
 
-import { problems } from '../utils/problems.js';
-
 export const rateLimitMiddleware = async (
   c: Context<{ Variables: Variables }>,
   next: Next,
 ) => {
   const apiKeyInfo = c.get('apiKeyInfo');
 
-  // ---------------------------------------------------------
-  // 1. REDIS FALLBACK (SAFETY NET)
-  // ---------------------------------------------------------
-  // If Redis provides no protection, we must enforce a local safety net
-  // to prevent total system abuse during outages.
+  /**
+   * REDIS FALLBACK (SAFETY NET)
+   *
+   * If Redis provides no protection, we must enforce a local safety net
+   * to prevent total system abuse during outages.
+   */
   if (!apiKeyInfo || !redis) {
     if (!redis) {
       const ip = c.req.header('CF-Connecting-IP') || 'unknown-ip';
@@ -125,8 +128,10 @@ export const rateLimitMiddleware = async (
     );
   } catch (error: any) {
     logger.error({ error: error.message }, 'Redis Rate Limit Error');
-    // If Redis fails mid-flight, we fail open but log it.
-    // The next request will likely catch the !redis check above.
+    /**
+     * If Redis fails mid-flight, we fail open but log it.
+     * The next request will likely catch the !redis check above.
+     */
   }
 
   await next();
