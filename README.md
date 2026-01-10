@@ -79,6 +79,8 @@ The gateway is built with performance as a first-class citizen. Running `bun tes
 bun test src/index.test.ts
 ```
 
+For a comprehensive breakdown of all security (SSRF), chaos (Redis Failure), and quota enforcement verification scenarios, please check the [TEST_REPORT.md](TEST_REPORT.md).
+
 ## License
 
 MIT - Build something cool.

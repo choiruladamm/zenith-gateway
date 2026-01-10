@@ -82,6 +82,29 @@ Zenith uses standard codes to signal specific gateway failures:
 
 ## 6. Observability
 
+Zenith provides multiple ways to monitor your gateway's health and performance.
+
+### Prometheus Metrics
+
+The gateway exposes a real-time metrics endpoint at `GET /metrics`. This can be scraped by Prometheus or Datadog.
+
+**Included Metrics:**
+
+- `zenith_http_requests_total{method, status, target}`: Total requests handled.
+- `zenith_http_errors_total{method, status, target}`: Total 4xx/5xx errors.
+- `zenith_http_request_duration_seconds_count{target}`: Count of requests per target.
+- `zenith_http_request_duration_seconds_sum{target}`: Total time spent on requests per target (in seconds).
+- `zenith_worker_queue_size`: Gauge showing how many logs are waiting in Redis to be flushed to the DB.
+
+**Example Output:**
+
+```text
+zenith_http_requests_total{method="GET",status="200",target="api.openai.com"} 42
+zenith_http_request_duration_seconds_sum{target="api.openai.com"} 12.45
+```
+
+### Database Logs
+
 Logs are batched and stored in the `usage_logs` table. You can query this table for:
 
 - **Latency Analysis**: `latency_ms` per endpoint.
