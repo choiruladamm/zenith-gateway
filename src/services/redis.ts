@@ -4,7 +4,6 @@ const redisUrl = process.env.UPSTASH_REDIS_URL;
 const redisToken = process.env.UPSTASH_REDIS_TOKEN;
 
 if (!redisUrl || !redisToken) {
-  // Graceful fallback for local dev if needed, or throw error
   console.warn(
     'Missing Redis environment variables. Rate limiting will be disabled.',
   );

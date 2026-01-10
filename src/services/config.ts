@@ -6,6 +6,11 @@ const REQUIRED_ENV_VARS = [
   'UPSTASH_REDIS_TOKEN',
 ];
 
+/**
+ * Validates that all required environment variables are present.
+ * Logs errors for missing essential variables (DB, Redis) and
+ * warnings for optional but recommended production settings.
+ */
 export function validateConfig() {
   const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
 
@@ -25,6 +30,10 @@ export function validateConfig() {
   }
 }
 
+/**
+ * Centralized application configuration.
+ * Parses environment variables into typed, easy-to-use properties.
+ */
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   isDev: process.env.NODE_ENV !== 'production',

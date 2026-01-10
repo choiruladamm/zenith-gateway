@@ -5,8 +5,20 @@ import { eq, and } from 'drizzle-orm';
 import { logger } from '../services/logger.js';
 import { Variables } from '../types/index.js';
 import { hashApiKey } from '../utils/crypto.js';
-import { HEADERS } from '../constants/index.js';
+import { HEADERS, REDIS_KEYS } from '../constants/index.js';
+import { redis } from '../services/redis.js';
 
+/**
+ * Middleware responsible for authenticating requests via API keys.
+ *
+ * Logic flow:
+ * 1. Extraction: Retrieves 'X-Zenith-Key' from headers.
+ * 2. Hashing: Computes SHA-256 hash of the plain-text key for secure lookup.
+ * 3. Cache Check: Attempts to find hashed key metadata in Redis (cache-aside).
+ * 4. DB Fallback: Queries Postgres (joining 'api_keys' and 'plans') if cache misses.
+ * 5. Validation: Verifies key status (must be 'active') and existence.
+ * 6. Cache Sync: Updates Redis with found metadata (5-minute TTL) for future hits.
+ */
 export const authMiddleware = async (
   c: Context<{ Variables: Variables }>,
   next: Next,
@@ -20,6 +32,17 @@ export const authMiddleware = async (
 
   try {
     const hashed_key = await hashApiKey(api_key);
+
+    const cacheKey = `${REDIS_KEYS.API_KEY_CACHE_PREFIX}:${hashed_key}`;
+
+    if (redis) {
+      const cached = await redis.get<any>(cacheKey);
+      if (cached) {
+        logger.debug({ api_key_id: cached.id }, 'Auth successful (Cache Hit)');
+        c.set('apiKeyInfo', cached);
+        return await next();
+      }
+    }
 
     const [key_data] = (await db
       .select({
@@ -56,7 +79,11 @@ export const authMiddleware = async (
       );
     }
 
-    logger.debug({ api_key_id: key_data.id }, 'Auth successful');
+    if (redis) {
+      await redis.set(cacheKey, JSON.stringify(key_data), { ex: 300 });
+    }
+
+    logger.debug({ api_key_id: key_data.id }, 'Auth successful (Cache Miss)');
 
     c.set('apiKeyInfo', key_data);
 
