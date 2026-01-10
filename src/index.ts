@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { problems } from './utils/problems.js';
 import { secureHeaders } from 'hono/secure-headers';
 import { authMiddleware } from './middlewares/auth.js';
 import { usageMiddleware } from './middlewares/usage.js';
@@ -63,7 +64,7 @@ app.all(
 
     if (!url) {
       logger.warn('Proxy request missing target URL');
-      return c.json({ error: 'Target URL is required' }, 400);
+      return problems.badRequest(c, 'Target URL is required');
     }
 
     try {
@@ -80,12 +81,11 @@ app.all(
         headers: responseHeaders,
       });
     } catch (error: any) {
-      const status = error.message.startsWith('Forbidden') ? 403 : 502;
+      if (error.message.startsWith('Forbidden')) {
+        return problems.forbidden(c, error.message);
+      }
       logger.error({ error: error.message, url }, 'Proxy Error');
-      return c.json(
-        { error: 'Proxy Request Failed', details: error.message },
-        status,
-      );
+      return problems.badGateway(c, error.message || 'Proxy Request Failed');
     }
   },
 );

@@ -15,12 +15,64 @@ import { HEADERS, REDIS_KEYS, TIME } from '../constants/index.js';
  *
  * Reports status via 'X-RateLimit-*' headers for client-side awareness.
  */
+const fallbackStore = new Map<string, { count: number; expiresAt: number }>();
+const FALLBACK_LIMIT = 100; // Requests per minute per IP when Redis is down
+const CLEANUP_INTERVAL = 60000; // 1 minute
+
+// Simple cleanup for fallback store
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of fallbackStore.entries()) {
+    if (now > value.expiresAt) {
+      fallbackStore.delete(key);
+    }
+  }
+}, CLEANUP_INTERVAL);
+
+import { problems } from '../utils/problems.js';
+
 export const rateLimitMiddleware = async (
   c: Context<{ Variables: Variables }>,
   next: Next,
 ) => {
   const apiKeyInfo = c.get('apiKeyInfo');
-  if (!apiKeyInfo || !redis) return await next();
+
+  // ---------------------------------------------------------
+  // 1. REDIS FALLBACK (SAFETY NET)
+  // ---------------------------------------------------------
+  // If Redis provides no protection, we must enforce a local safety net
+  // to prevent total system abuse during outages.
+  if (!apiKeyInfo || !redis) {
+    if (!redis) {
+      const ip = c.req.header('CF-Connecting-IP') || 'unknown-ip';
+      const now = Date.now();
+      const record = fallbackStore.get(ip) || {
+        count: 0,
+        expiresAt: now + 60000,
+      };
+
+      if (now > record.expiresAt) {
+        record.count = 0;
+        record.expiresAt = now + 60000;
+      }
+
+      record.count++;
+      fallbackStore.set(ip, record);
+
+      if (record.count > FALLBACK_LIMIT) {
+        logger.warn(
+          { ip, count: record.count },
+          'Emergency Rate Limit Active (Redis Down)',
+        );
+        return problems.rateLimited(
+          c,
+          'Service is in emergency mode. Please slow down.',
+          60,
+        );
+      }
+    }
+    return await next();
+  }
 
   const plan = apiKeyInfo.plans;
   if (!plan) return await next();
@@ -39,12 +91,9 @@ export const rateLimitMiddleware = async (
         { api_key_id: apiKeyInfo.id, monthly_usage: currentMonthly, quota },
         'Monthly quota exceeded',
       );
-      return c.json(
-        {
-          error: 'Quota Exceeded',
-          message: `Monthly quota of ${quota} requests exceeded.`,
-        },
-        429,
+      return problems.quotaExceeded(
+        c,
+        `Monthly quota of ${quota} requests exceeded.`,
       );
     }
 
@@ -59,12 +108,9 @@ export const rateLimitMiddleware = async (
         { api_key_id: apiKeyInfo.id, rate_limit: limit },
         'Rate limit exceeded',
       );
-      return c.json(
-        {
-          error: 'Too Many Requests',
-          message: `Plan limit of ${limit} req/min exceeded.`,
-        },
-        429,
+      return problems.rateLimited(
+        c,
+        `Plan limit of ${limit} req/min exceeded.`,
       );
     }
 
@@ -77,8 +123,10 @@ export const rateLimitMiddleware = async (
       HEADERS.RATELIMIT_REMAINING,
       Math.max(0, limit - currentMinute).toString(),
     );
-  } catch (error) {
-    logger.error({ error }, 'Redis Rate Limit Error');
+  } catch (error: any) {
+    logger.error({ error: error.message }, 'Redis Rate Limit Error');
+    // If Redis fails mid-flight, we fail open but log it.
+    // The next request will likely catch the !redis check above.
   }
 
   await next();
